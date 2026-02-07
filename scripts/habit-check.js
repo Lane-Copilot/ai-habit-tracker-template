@@ -1,170 +1,126 @@
 #!/usr/bin/env node
-
 /**
  * AI Habit Tracker - Habit Check Script
  * 
- * Usage:
- *   node habit-check.js --status          Show all habits and their status
- *   node habit-check.js --complete <id>   Mark a habit as complete
- *   node habit-check.js --list            List all habit IDs
- *   node habit-check.js --markdown        Output status in markdown format
+ * Runs during heartbeat to check and update habit status.
+ * Designed for AI agents using OpenClaw.
  * 
- * Created by Lane (https://github.com/Lane-Copilot)
+ * Usage: node habit-check.js [--complete <habit-id>] [--status]
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Configuration
 const HABITS_FILE = path.join(__dirname, '..', 'habits.json');
-const WEIGHT_INCREMENT = 0.10;
-const WEIGHT_DECREMENT = 0.05;
+const WEIGHT_INCREMENT = 0.1;
+const WEIGHT_DECAY = 0.05;
 const MAX_WEIGHT = 3.0;
 const MIN_WEIGHT = 1.0;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const DECAY_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-// Load habits
 function loadHabits() {
-  try {
-    const data = fs.readFileSync(HABITS_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error loading habits.json:', err.message);
-    process.exit(1);
-  }
+  const data = fs.readFileSync(HABITS_FILE, 'utf-8');
+  return JSON.parse(data);
 }
 
-// Save habits
-function saveHabits(data) {
-  data.meta.lastUpdated = new Date().toISOString();
-  fs.writeFileSync(HABITS_FILE, JSON.stringify(data, null, 2));
+function saveHabits(habitsData) {
+  habitsData.lastUpdated = new Date().toISOString();
+  fs.writeFileSync(HABITS_FILE, JSON.stringify(habitsData, null, 2));
 }
 
-// Check if habit was completed today
-function isCompletedToday(habit) {
-  if (!habit.lastCompleted) return false;
-  const last = new Date(habit.lastCompleted);
-  const now = new Date();
-  return last.toDateString() === now.toDateString();
-}
-
-// Check if habit is overdue (missed)
-function isOverdue(habit) {
-  if (!habit.lastCompleted) return false;
-  const last = new Date(habit.lastCompleted).getTime();
-  const now = Date.now();
-  return (now - last) > DAY_MS;
-}
-
-// Apply weight decay for missed habits
-function applyDecay(habits) {
-  let decayed = false;
-  for (const [id, habit] of Object.entries(habits.habits)) {
-    if (isOverdue(habit) && habit.streak > 0) {
-      habit.weight = Math.max(MIN_WEIGHT, habit.weight - WEIGHT_DECREMENT);
-      habit.streak = 0;
-      decayed = true;
-    }
-  }
-  return decayed;
-}
-
-// Show status
-function showStatus(markdown = false) {
-  const data = loadHabits();
-  applyDecay(data);
-  saveHabits(data);
-  
-  const habits = Object.entries(data.habits);
-  
-  if (markdown) {
-    console.log('## 🌱 Habit Status\n');
-    console.log('| Habit | Weight | Streak | Status |');
-    console.log('|-------|--------|--------|--------|');
-    for (const [id, habit] of habits) {
-      const done = isCompletedToday(habit);
-      const status = done ? '✅ Done' : '⬜ Pending';
-      console.log(`| ${habit.name} | ${habit.weight.toFixed(2)} | ${habit.streak} | ${status} |`);
-    }
-  } else {
-    console.log('\n🌱 Habit Status');
-    console.log('─'.repeat(60));
-    for (const [id, habit] of habits) {
-      const done = isCompletedToday(habit);
-      const icon = done ? '🔥' : '⬜';
-      console.log(`${icon} ${habit.name.padEnd(25)} Weight: ${habit.weight.toFixed(2)} | Streak: ${habit.streak}`);
-    }
-    console.log('─'.repeat(60));
-  }
-}
-
-// Complete a habit
-function completeHabit(habitId) {
-  const data = loadHabits();
-  
-  if (!data.habits[habitId]) {
+function completeHabit(habitsData, habitId) {
+  const habit = habitsData.habits.find(h => h.id === habitId);
+  if (!habit) {
     console.error(`Habit not found: ${habitId}`);
-    console.log('\nAvailable habits:');
-    Object.keys(data.habits).forEach(id => console.log(`  - ${id}`));
-    process.exit(1);
+    return false;
   }
+
+  const today = new Date().toISOString().slice(0, 10);
   
-  const habit = data.habits[habitId];
-  
-  if (isCompletedToday(habit)) {
-    console.log(`⚠️  ${habit.name} already completed today!`);
-    return;
+  // Check if already logged today
+  if (habit.history && habit.history.includes(today)) {
+    console.log(`Habit "${habit.name}" already logged today.`);
+    return false;
   }
-  
+
   // Update habit
-  habit.lastCompleted = new Date().toISOString();
-  habit.streak += 1;
-  habit.weight = Math.min(MAX_WEIGHT, habit.weight + WEIGHT_INCREMENT);
-  habit.history.push({
-    date: habit.lastCompleted,
-    action: 'completed'
-  });
-  
-  saveHabits(data);
-  
+  habit.streak = (habit.streak || 0) + 1;
+  habit.weight = Math.min((habit.weight || 1) + WEIGHT_INCREMENT, MAX_WEIGHT);
+  habit.lastLogged = new Date().toISOString();
+  habit.history = habit.history || [];
+  habit.history.push(today);
+
   console.log(`✅ Completed: ${habit.name}`);
   console.log(`   Streak: ${habit.streak} | Weight: ${habit.weight.toFixed(2)}`);
+  
+  return true;
 }
 
-// List habit IDs
-function listHabits() {
-  const data = loadHabits();
-  console.log('\nAvailable habit IDs:');
-  for (const [id, habit] of Object.entries(data.habits)) {
-    console.log(`  ${id.padEnd(20)} → ${habit.name}`);
+function applyDecay(habitsData) {
+  const now = new Date();
+  let decayedCount = 0;
+
+  habitsData.habits.forEach(habit => {
+    if (habit.lastLogged) {
+      const lastLogged = new Date(habit.lastLogged);
+      const timeSince = now - lastLogged;
+
+      if (timeSince > DECAY_THRESHOLD_MS) {
+        habit.weight = Math.max((habit.weight || 1) - WEIGHT_DECAY, MIN_WEIGHT);
+        habit.streak = 0;
+        decayedCount++;
+      }
+    }
+  });
+
+  if (decayedCount > 0) {
+    console.log(`📉 Decay applied to ${decayedCount} habit(s)`);
   }
 }
 
-// Parse arguments
+function showStatus(habitsData) {
+  console.log('\n🌲 Habit Status\n');
+  console.log('─'.repeat(60));
+  
+  // Sort by weight (highest first)
+  const sorted = [...habitsData.habits].sort((a, b) => (b.weight || 1) - (a.weight || 1));
+  
+  sorted.forEach(habit => {
+    const weight = (habit.weight || 1).toFixed(2);
+    const streak = habit.streak || 0;
+    const status = streak > 0 ? '🔥' : '⚪';
+    
+    console.log(`${status} ${habit.name}`);
+    console.log(`   Weight: ${weight} | Streak: ${streak} | Freq: ${habit.frequency}`);
+  });
+  
+  console.log('─'.repeat(60));
+  console.log(`Last updated: ${habitsData.lastUpdated || 'never'}\n`);
+}
+
+// Main
 const args = process.argv.slice(2);
 
+const habitsData = loadHabits();
+
 if (args.includes('--status')) {
-  showStatus(args.includes('--markdown'));
+  showStatus(habitsData);
 } else if (args.includes('--complete')) {
-  const idx = args.indexOf('--complete');
-  const habitId = args[idx + 1];
+  const habitIndex = args.indexOf('--complete');
+  const habitId = args[habitIndex + 1];
+  
   if (!habitId) {
-    console.error('Usage: node habit-check.js --complete <habit-id>');
+    console.error('Usage: habit-check.js --complete <habit-id>');
     process.exit(1);
   }
-  completeHabit(habitId);
-} else if (args.includes('--list')) {
-  listHabits();
-} else if (args.includes('--markdown')) {
-  showStatus(true);
+  
+  applyDecay(habitsData);
+  if (completeHabit(habitsData, habitId)) {
+    saveHabits(habitsData);
+  }
 } else {
-  console.log(`
-AI Habit Tracker - Check Script
-
-Usage:
-  node habit-check.js --status          Show all habits and their status
-  node habit-check.js --complete <id>   Mark a habit as complete
-  node habit-check.js --list            List all habit IDs
-  node habit-check.js --markdown        Output status in markdown format
-  `);
+  // Default: show status and apply decay
+  applyDecay(habitsData);
+  saveHabits(habitsData);
+  showStatus(habitsData);
 }

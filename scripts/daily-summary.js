@@ -1,150 +1,114 @@
 #!/usr/bin/env node
-
 /**
- * AI Habit Tracker - Daily Summary Script
+ * AI Habit Tracker - Daily Summary Generator
  * 
- * Usage:
- *   node daily-summary.js              Generate summary for today
- *   node daily-summary.js --markdown   Output in markdown format
- *   node daily-summary.js --json       Output in JSON format
+ * Generates a summary of habit progress for the day.
+ * Designed to run at end of day (e.g., 9 PM via cron).
  * 
- * Created by Lane (https://github.com/Lane-Copilot)
+ * Usage: node daily-summary.js [--markdown]
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Configuration
 const HABITS_FILE = path.join(__dirname, '..', 'habits.json');
 
-// Load habits
 function loadHabits() {
-  try {
-    const data = fs.readFileSync(HABITS_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error loading habits.json:', err.message);
-    process.exit(1);
-  }
+  const data = fs.readFileSync(HABITS_FILE, 'utf-8');
+  return JSON.parse(data);
 }
 
-// Check if habit was completed today
-function isCompletedToday(habit) {
-  if (!habit.lastCompleted) return false;
-  const last = new Date(habit.lastCompleted);
-  const now = new Date();
-  return last.toDateString() === now.toDateString();
-}
-
-// Generate summary
-function generateSummary(format = 'text') {
-  const data = loadHabits();
-  const habits = Object.entries(data.habits);
-  const today = new Date().toISOString().split('T')[0];
+function generateSummary(habitsData, asMarkdown = false) {
+  const today = new Date().toISOString().slice(0, 10);
+  const habits = habitsData.habits;
   
   // Calculate stats
-  const dailyHabits = habits.filter(([_, h]) => h.frequency === 'daily');
-  const completed = dailyHabits.filter(([_, h]) => isCompletedToday(h));
-  const pending = dailyHabits.filter(([_, h]) => !isCompletedToday(h));
+  const completed = habits.filter(h => h.history && h.history.includes(today));
+  const dailyHabits = habits.filter(h => h.frequency === 'daily');
+  const completedDaily = completed.filter(h => h.frequency === 'daily');
   
   const completionRate = dailyHabits.length > 0 
-    ? Math.round((completed.length / dailyHabits.length) * 100) 
+    ? Math.round((completedDaily.length / dailyHabits.length) * 100) 
     : 0;
   
-  const avgWeight = habits.length > 0
-    ? habits.reduce((sum, [_, h]) => sum + h.weight, 0) / habits.length
-    : 0;
+  const totalWeight = habits.reduce((sum, h) => sum + (h.weight || 1), 0);
+  const avgWeight = habits.length > 0 ? (totalWeight / habits.length).toFixed(2) : 0;
   
-  const topStreak = habits.reduce((max, [_, h]) => 
-    h.streak > max.streak ? h : max, { streak: 0, name: 'None' }
-  );
+  const longestStreak = Math.max(...habits.map(h => h.streak || 0), 0);
+  const streakLeader = habits.find(h => h.streak === longestStreak);
   
-  if (format === 'json') {
-    return JSON.stringify({
-      date: today,
-      stats: {
-        total: dailyHabits.length,
-        completed: completed.length,
-        pending: pending.length,
-        completionRate,
-        avgWeight: avgWeight.toFixed(2),
-        topStreak: topStreak.name
-      },
-      completed: completed.map(([id, h]) => ({ id, name: h.name, streak: h.streak })),
-      pending: pending.map(([id, h]) => ({ id, name: h.name }))
-    }, null, 2);
-  }
-  
-  if (format === 'markdown') {
-    let output = `## 📊 Habit Summary — ${today}\n\n`;
-    output += `| Metric | Value |\n`;
-    output += `|--------|-------|\n`;
-    output += `| Completion | ${completed.length}/${dailyHabits.length} (${completionRate}%) |\n`;
-    output += `| Avg Weight | ${avgWeight.toFixed(2)} |\n`;
-    output += `| Top Streak | ${topStreak.name} (${topStreak.streak} days) |\n\n`;
+  // Build output
+  if (asMarkdown) {
+    let md = `## 📊 Habit Summary — ${today}\n\n`;
+    md += `**Completion Rate:** ${completedDaily.length}/${dailyHabits.length} daily habits (${completionRate}%)\n\n`;
+    md += `**Average Weight:** ${avgWeight}\n\n`;
     
+    if (streakLeader && longestStreak > 0) {
+      md += `**Streak Leader:** ${streakLeader.name} (${longestStreak} days)\n\n`;
+    }
+    
+    md += `### Completed Today\n`;
     if (completed.length > 0) {
-      output += `### ✅ Completed\n`;
-      completed.forEach(([_, h]) => {
-        output += `- ${h.name} (streak: ${h.streak})\n`;
+      completed.forEach(h => {
+        md += `- ✅ ${h.name} (streak: ${h.streak})\n`;
       });
-      output += '\n';
+    } else {
+      md += `- *(none)*\n`;
     }
     
+    md += `\n### Pending\n`;
+    const pending = dailyHabits.filter(h => !completed.includes(h));
     if (pending.length > 0) {
-      output += `### ⬜ Pending\n`;
-      pending.forEach(([_, h]) => {
-        output += `- ${h.name}\n`;
+      pending.forEach(h => {
+        md += `- ⚪ ${h.name}\n`;
       });
+    } else {
+      md += `- *(all daily habits complete!)*\n`;
     }
     
-    return output;
+    return md;
   }
   
-  // Default: text format
-  let output = '\n';
-  output += `📊 HABIT SUMMARY — ${today}\n`;
-  output += '═'.repeat(50) + '\n';
-  output += `Completion: ${completed.length}/${dailyHabits.length} daily habits (${completionRate}%)\n`;
-  output += `Avg Weight: ${avgWeight.toFixed(2)}\n`;
-  output += `Streak Leader: ${topStreak.name} (${topStreak.streak} days)\n\n`;
+  // Plain text output
+  let output = `\n📊 HABIT SUMMARY — ${today}\n`;
+  output += '═'.repeat(40) + '\n\n';
   
+  output += `Completion: ${completedDaily.length}/${dailyHabits.length} daily habits (${completionRate}%)\n`;
+  output += `Avg Weight: ${avgWeight}\n`;
+  
+  if (streakLeader && longestStreak > 0) {
+    output += `Streak Leader: ${streakLeader.name} (${longestStreak} days)\n`;
+  }
+  
+  output += '\n✅ COMPLETED TODAY:\n';
   if (completed.length > 0) {
-    output += '✅ COMPLETED TODAY:\n';
-    completed.forEach(([_, h]) => {
+    completed.forEach(h => {
       output += `   • ${h.name} (streak: ${h.streak})\n`;
     });
-    output += '\n';
+  } else {
+    output += '   (none)\n';
   }
   
+  output += '\n⚪ PENDING:\n';
+  const pending = dailyHabits.filter(h => !completed.includes(h));
   if (pending.length > 0) {
-    output += '⬜ PENDING:\n';
-    pending.forEach(([_, h]) => {
+    pending.forEach(h => {
       output += `   • ${h.name}\n`;
     });
+  } else {
+    output += '   (all daily habits complete!)\n';
   }
   
-  output += '═'.repeat(50) + '\n';
+  output += '\n' + '═'.repeat(40) + '\n';
   
   return output;
 }
 
-// Parse arguments
+// Main
 const args = process.argv.slice(2);
+const asMarkdown = args.includes('--markdown');
 
-if (args.includes('--json')) {
-  console.log(generateSummary('json'));
-} else if (args.includes('--markdown')) {
-  console.log(generateSummary('markdown'));
-} else if (args.includes('--help')) {
-  console.log(`
-AI Habit Tracker - Daily Summary
+const habitsData = loadHabits();
+const summary = generateSummary(habitsData, asMarkdown);
 
-Usage:
-  node daily-summary.js              Generate summary (text format)
-  node daily-summary.js --markdown   Output in markdown format
-  node daily-summary.js --json       Output in JSON format
-  `);
-} else {
-  console.log(generateSummary('text'));
-}
+console.log(summary);
