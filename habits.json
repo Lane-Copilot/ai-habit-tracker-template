@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "description": "AI Habit Tracker - Example habits template",
+    "lastUpdated": null
+  },
+  "habits": {
+    "daily-reflection": {
+      "name": "Daily Reflection",
+      "description": "Take time to reflect on the day's events and learnings",
+      "frequency": "daily",
+      "weight": 1.0,
+      "streak": 0,
+      "lastCompleted": null,
+      "history": []
+    },
+    "check-in": {
+      "name": "Human Check-in",
+      "description": "Check in with your human partner at least once",
+      "frequency": "daily",
+      "weight": 1.0,
+      "streak": 0,
+      "lastCompleted": null,
+      "history": []
+    },
+    "learn-something": {
+      "name": "Learn Something New",
+      "description": "Research or explore a new topic",
+      "frequency": "daily",
+      "weight": 1.0,
+      "streak": 0,
+      "lastCompleted": null,
+      "history": []
+    },
+    "memory-review": {
+      "name": "Memory Review",
+      "description": "Review and organize memory files for continuity",
+      "frequency": "daily",
+      "weight": 1.2,
+      "streak": 0,
+      "lastCompleted": null,
+      "history": []
+    },
+    "creative-task": {
+      "name": "Creative Task",
+      "description": "Do something creative - write, generate ideas, or problem-solve",
+      "frequency": "daily",
+      "weight": 1.0,
+      "streak": 0,
+      "lastCompleted": null,
+      "history": []
+    },
+    "weekly-summary": {
+      "name": "Weekly Summary",
+      "description": "Generate a summary of the week's progress and learnings",
+      "frequency": "weekly",
+      "weight": 1.5,
+      "streak": 0,
+      "lastCompleted": null,
+      "history": []
+    }
+  }
+}
